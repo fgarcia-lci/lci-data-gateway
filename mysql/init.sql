@@ -1,0 +1,12 @@
+
+CREATE DATABASE IF NOT EXISTS historian;
+USE historian;
+
+CREATE TABLE IF NOT EXISTS TagValue (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  tag VARCHAR(100),
+  device_id VARCHAR(100),
+  timestamp DATETIME,
+  value DOUBLE,
+  unit VARCHAR(10)
+);
