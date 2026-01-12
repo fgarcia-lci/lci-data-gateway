@@ -14,6 +14,19 @@ app.use(express.json());
 // Database connections
 let mongoClient, mysqlConnection;
 
+// Basic pagination helpers
+const PAGE_DEFAULT = 1;
+const PAGE_SIZE_DEFAULT = 50;
+const PAGE_SIZE_MAX = 200;
+
+function parsePagination(req) {
+  const page = Math.max(PAGE_DEFAULT, parseInt(req.query.page || PAGE_DEFAULT, 10) || PAGE_DEFAULT);
+  const pageSizeRaw = parseInt(req.query.pageSize || PAGE_SIZE_DEFAULT, 10) || PAGE_SIZE_DEFAULT;
+  const pageSize = Math.min(PAGE_SIZE_MAX, Math.max(1, pageSizeRaw));
+  const skip = (page - 1) * pageSize;
+  return { page, pageSize, skip };
+}
+
 // Initialize database connections
 async function initDatabases() {
   try {
@@ -42,14 +55,43 @@ async function initDatabases() {
 // Get all devices with current status and latest values
 app.get('/api/devices', async (req, res) => {
   try {
+    const { page, pageSize, skip } = parsePagination(req);
     const db = mongoClient.db('gateway');
-    
-    // Get devices with their current status
-    const devices = await db.collection('devices').find({}).toArray();
-    
-    // Get current values for all tags
-    const currentValues = await db.collection('current_values').find({}).toArray();
-    
+
+    // Fetch paginated devices with a light projection
+    const devicesCollection = db.collection('devices');
+    const total = await devicesCollection.estimatedDocumentCount();
+    const devices = await devicesCollection
+      .find(
+        {},
+        {
+          projection: {
+            device_id: 1,
+            name: 1,
+            xeokit_id: 1,
+            tags: 1,
+            status: 1,
+            status_timestamp: 1
+          }
+        }
+      )
+      .sort({ device_id: 1 })
+      .skip(skip)
+      .limit(pageSize)
+      .toArray();
+
+    // Fetch current values only for tags in this page to reduce load
+    const tagList = devices.flatMap(d => d.tags || []);
+    let currentValues = [];
+    if (tagList.length > 0) {
+      currentValues = await db.collection('current_values')
+        .find(
+          { tag: { $in: tagList } },
+          { projection: { tag: 1, device_id: 1, value: 1, unit: 1, timestamp: 1 } }
+        )
+        .toArray();
+    }
+
     // Combine device info with current values
     const devicesWithData = devices.map(device => {
       const deviceValues = currentValues.filter(val => val.device_id === device.device_id);
@@ -82,7 +124,12 @@ app.get('/api/devices', async (req, res) => {
       };
     });
     
-    res.json(devicesWithData);
+    res.json({
+      page,
+      pageSize,
+      total,
+      items: devicesWithData
+    });
   } catch (error) {
     console.error('Error fetching devices:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -93,13 +140,14 @@ app.get('/api/devices', async (req, res) => {
 app.get('/api/history/:deviceId/:tag', async (req, res) => {
   try {
     const { deviceId, tag } = req.params;
-    const { hours = 24 } = req.query;
+    const { hours = 24, limit = 500 } = req.query;
     
     const hoursAgo = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const safeLimit = Math.min(2000, Math.max(1, parseInt(limit, 10) || 500));
     
     const [rows] = await mysqlConnection.execute(
-      'SELECT timestamp, value FROM TagValue WHERE device_id = ? AND tag = ? AND timestamp >= ? ORDER BY timestamp DESC LIMIT 1000',
-      [deviceId, tag, hoursAgo]
+      'SELECT timestamp, value, unit FROM TagValue WHERE device_id = ? AND tag = ? AND timestamp >= ? ORDER BY timestamp DESC LIMIT ?',
+      [deviceId, tag, hoursAgo, safeLimit]
     );
     
     res.json(rows);

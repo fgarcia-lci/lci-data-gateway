@@ -24,6 +24,7 @@ services:
       - "27017:27017"
     volumes:
       - ./mongodb/init.js:/docker-entrypoint-initdb.d/init.js:ro
+      - ./mongodb/devices.json:/docker-entrypoint-initdb.d/devices.json:ro
       - mongo_data:/data/db
     restart: unless-stopped
     healthcheck:
@@ -49,6 +50,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./simulator/simulator.py:/app/simulator.py:ro
+      - ./mongodb/devices.json:/app/devices.json:ro
 
   gateway-api:
     build: ./services/gateway-api
