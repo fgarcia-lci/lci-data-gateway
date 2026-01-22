@@ -63,6 +63,8 @@ services:
     ports:
       - "3001:3001"
     restart: unless-stopped
+    volumes:
+      - ./services/gateway-api/server.js:/app/server.js:ro
 
 volumes:
   mysql_data:

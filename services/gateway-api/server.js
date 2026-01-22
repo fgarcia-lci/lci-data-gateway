@@ -143,7 +143,7 @@ app.get('/api/devices', async (req, res) => {
         }
       };
     });
-    
+
     res.json({
       page,
       pageSize,
